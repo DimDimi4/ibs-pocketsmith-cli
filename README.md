@@ -1,7 +1,6 @@
-ibs-pocketsmith
-===============
+# ibs-pocketsmith
 
-Israli bank scrappers to pocketsmith
+CLI for importing scraped data from Israeli banks and credit companies to PocketSmith application
 
 [![oclif](https://img.shields.io/badge/cli-oclif-brightgreen.svg)](https://oclif.io)
 [![Version](https://img.shields.io/npm/v/ibs-pocketsmith.svg)](https://npmjs.org/package/ibs-pocketsmith)
@@ -10,11 +9,15 @@ Israli bank scrappers to pocketsmith
 [![License](https://img.shields.io/npm/l/ibs-pocketsmith.svg)](https://github.com/dima/ibs-pocketsmith/blob/master/package.json)
 
 <!-- toc -->
-* [Usage](#usage)
-* [Commands](#commands)
+
+- [Usage](#usage)
+- [Commands](#commands)
 <!-- tocstop -->
+
 # Usage
+
 <!-- usage -->
+
 ```sh-session
 $ npm install -g ibs-pocketsmith
 $ ibs-ps COMMAND
@@ -26,8 +29,11 @@ USAGE
   $ ibs-ps COMMAND
 ...
 ```
+
 <!-- usagestop -->
+
 # Commands
+
 <!-- commands -->
 
 <!-- commandsstop -->
