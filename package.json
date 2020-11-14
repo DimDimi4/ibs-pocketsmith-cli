@@ -1,49 +1,66 @@
 {
-  "name": "ibs-pocketsmith",
-  "description": "Israli bank scrappers to pocketsmith",
-  "version": "0.0.0",
-  "author": "Dima",
-  "bin": {
-    "ibs-ps": "./bin/run"
-  },
-  "bugs": "https://github.com/dima/ibs-pocketsmith/issues",
-  "dependencies": {
-    "@oclif/command": "^1.8.0",
-    "@oclif/config": "^1.17.0",
-    "@oclif/plugin-help": "^3.2.0",
-    "tslib": "^1.14.1"
-  },
-  "devDependencies": {
-    "@oclif/dev-cli": "^1.23.0",
-    "@types/node": "^10.17.44",
-    "eslint": "^5.16.0",
-    "eslint-config-oclif": "^3.1.0",
-    "eslint-config-oclif-typescript": "^0.1.0",
-    "ts-node": "^8.10.2",
-    "typescript": "^3.9.7"
-  },
-  "engines": {
-    "node": ">=8.0.0"
-  },
-  "files": [
-    "/bin",
-    "/lib"
-  ],
-  "homepage": "https://github.com/dima/ibs-pocketsmith",
-  "keywords": [
-    "oclif"
-  ],
-  "license": "MIT",
-  "main": "lib/index.js",
-  "oclif": {
-    "bin": "ibs-ps"
-  },
-  "repository": "dima/ibs-pocketsmith",
-  "scripts": {
-    "posttest": "eslint . --ext .ts --config .eslintrc",
-    "prepack": "rm -rf lib && tsc -b && oclif-dev readme",
-    "test": "echo NO TESTS",
-    "version": "oclif-dev readme && git add README.md"
-  },
-  "types": "lib/index.d.ts"
+    "name": "ibs-pocketsmith",
+    "description": "Israeli bank scrappers to PocketSmith",
+    "version": "0.0.0",
+    "author": "Dima",
+    "bin": {
+        "ibs-ps": "./bin/run"
+    },
+    "bugs": "https://github.com/dima/ibs-pocketsmith/issues",
+    "dependencies": {
+        "@oclif/command": "^1.8.0",
+        "@oclif/config": "^1.17.0",
+        "@oclif/plugin-help": "^3.2.0",
+        "chalk": "^4.1.0",
+        "cli-ux": "^5.5.1",
+        "conf": "^7.1.2",
+        "inquirer": "^7.3.3",
+        "israeli-bank-scrapers": "^1.0.0",
+        "puppeteer-core": "^5.4.1",
+        "tslib": "^1.14.1"
+    },
+    "devDependencies": {
+        "@oclif/dev-cli": "^1.23.0",
+        "@types/fs-extra": "^9.0.4",
+        "@types/inquirer": "^7.3.1",
+        "@types/node": "^10.17.44",
+        "eslint": "^5.16.0",
+        "eslint-config-oclif": "^3.1.0",
+        "eslint-config-oclif-typescript": "^0.1.0",
+        "globby": "^10.0.2",
+        "nyc": "^14.1.1",
+        "ts-node": "^8.10.2",
+        "typescript": "^3.9.7"
+    },
+    "engines": {
+        "node": ">=8.0.0"
+    },
+    "files": [
+        "/bin",
+        "/lib",
+        "/npm-shrinkwrap.json",
+        "/oclif.manifest.json"
+    ],
+    "homepage": "https://github.com/dima/ibs-pocketsmith",
+    "keywords": [
+        "oclif"
+    ],
+    "license": "MIT",
+    "main": "lib/index.js",
+    "oclif": {
+        "commands": "./lib/commands",
+        "bin": "ibs-ps",
+        "plugins": [
+            "@oclif/plugin-help"
+        ]
+    },
+    "repository": "dima/ibs-pocketsmith",
+    "scripts": {
+        "postpack": "rm -f oclif.manifest.json",
+        "posttest": "eslint . --ext .ts --config .eslintrc",
+        "prepack": "rm -rf lib && tsc -b && oclif-dev manifest && oclif-dev readme",
+        "test": "echo NO TESTS",
+        "version": "oclif-dev readme && git add README.md"
+    },
+    "types": "lib/index.d.ts"
 }
