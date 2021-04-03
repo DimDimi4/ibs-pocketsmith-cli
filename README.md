@@ -9,6 +9,10 @@ CLI for importing scraped data from Israeli banks and credit companies to Pocket
 [![License](https://img.shields.io/npm/l/ibs-pocketsmith.svg)](https://github.com/dima/ibs-pocketsmith/blob/master/package.json)
 
 <!-- toc -->
+* [ibs-pocketsmith](#ibs-pocketsmith)
+* [Usage](#usage)
+* [Commands](#commands)
+<!-- tocstop -->
 
 -   [Usage](#usage)
 -   [Commands](#commands)
@@ -17,6 +21,18 @@ CLI for importing scraped data from Israeli banks and credit companies to Pocket
 # Usage
 
 <!-- usage -->
+```sh-session
+$ npm install -g ibs-pocketsmith
+$ ibs-ps COMMAND
+running command...
+$ ibs-ps (-v|--version|version)
+ibs-pocketsmith/0.0.0 win32-x64 node-v14.16.0
+$ ibs-ps --help [COMMAND]
+USAGE
+  $ ibs-ps COMMAND
+...
+```
+<!-- usagestop -->
 
 ```sh-session
 $ npm install -g ibs-pocketsmith
@@ -35,6 +51,49 @@ USAGE
 # Commands
 
 <!-- commands -->
+* [`ibs-ps help [COMMAND]`](#ibs-ps-help-command)
+* [`ibs-ps scrape`](#ibs-ps-scrape)
+* [`ibs-ps setup`](#ibs-ps-setup)
+
+## `ibs-ps help [COMMAND]`
+
+display help for ibs-ps
+
+```
+USAGE
+  $ ibs-ps help [COMMAND]
+
+ARGUMENTS
+  COMMAND  command to show help for
+
+OPTIONS
+  --all  see all commands in CLI
+```
+
+_See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v3.2.0/src\commands\help.ts)_
+
+## `ibs-ps scrape`
+
+scrape bank results with selected scraper
+
+```
+USAGE
+  $ ibs-ps scrape
+```
+
+_See code: [src\commands\scrape.ts](https://github.com/dima/ibs-pocketsmith/blob/v0.0.0/src\commands\scrape.ts)_
+
+## `ibs-ps setup`
+
+setup pocketsmith development key
+
+```
+USAGE
+  $ ibs-ps setup
+```
+
+_See code: [src\commands\setup.ts](https://github.com/dima/ibs-pocketsmith/blob/v0.0.0/src\commands\setup.ts)_
+<!-- commandsstop -->
 
 -   [`ibs-ps hello [FILE]`](#ibs-ps-hello-file)
 -   [`ibs-ps help [COMMAND]`](#ibs-ps-help-command)
