@@ -1,227 +1,192 @@
-import * as chalk from 'chalk';
-import { utcToZonedTime } from 'date-fns-tz';
-import { parse, isValid, format, add, startOfDay } from 'date-fns';
+import { format } from 'date-fns';
 import { CompanyTypes, createScraper } from 'israeli-bank-scrapers';
-import { CliUx } from '@oclif/core';
 import * as progress from 'cli-progress';
 import axios from 'axios';
 
-import { SynArgs, PS_KEY, PocketsmithTransaction, LOAN_KEY } from '../types';
+import {
+  DB,
+  DBTransaction,
+  SynArgs,
+  PS_KEY,
+  PocketsmithTransaction,
+  LOAN_KEY,
+  CompanyType
+} from '../types';
 import Command from '../base';
-import { ScraperCredentials } from 'israeli-bank-scrapers/lib/scrapers/base-scraper';
 
 const CARD_TRANSACTIONS = ['כרטיס דביט', 'מקס איט פינ', 'לאומי ויזה'];
 const LOAD_TRANSACTIONS = ['פרעון'];
 
 export default class Sync extends Command {
-    static description = 'sync financial data to pocketsmith';
+  static description = 'sync financial data to pocketsmith';
 
-    static args = [
-        {
-            name: 'service',
-            description: 'financial service to get data from',
-            required: true,
-            options: [CompanyTypes.leumi, CompanyTypes.max]
-        },
-        {
-            name: 'startDate',
-            description: 'start date to sync transactions from',
-            required: true
-        }
-    ];
+  static args = [
+    {
+      name: 'service',
+      description: 'financial service to get data from',
+      required: true,
+      options: [CompanyTypes.leumi, CompanyTypes.max]
+    }
+  ];
 
-    public async run(): Promise<void> {
-        try {
-            const { args } = this.parse<{}, SynArgs>(Sync);
+  public async run(): Promise<void> {
+    try {
+      const { args } = this.parse<{}, SynArgs>(Sync);
 
-            let startDate = parse(args.startDate, 'd/M', new Date());
-            if (!isValid(startDate)) {
-                this.error(`Invalid start date: ${args.startDate}`);
-            }
-            startDate = this.normalizeDate(startDate);
+      switch (args.service) {
+        case CompanyTypes.leumi:
+          await this.syncLeumi(await this.getTxns(CompanyTypes.leumi));
+        case CompanyTypes.max:
+          await this.syncMax(await this.getTxns(CompanyTypes.max));
+        default:
+          this.error(`Unknown service: ${args.service}`);
+      }
+    } catch (error: any) {
+      this.error(error);
+    }
+  }
 
-            switch (args.service) {
-                case CompanyTypes.leumi:
-                    return this.syncLeumi(startDate);
-                case CompanyTypes.max:
-                    return this.syncMax(startDate);
-                default:
-                    this.error(`Unknown service: ${args.service}`);
-            }
-        } catch (error: any) {
-            this.error(error);
-        }
+  private async getTxns(companyType: CompanyType) {
+    const txns = await this.db.getObject<DBTransaction[] | undefined>(`${DB}/${companyType}`);
+    if (!txns || txns.length === 0) {
+      this.error(`No ${companyType} transactions found`);
     }
 
-    private async syncMax(startDate: Date) {
-        const maxConfig = await this.settings.get(CompanyTypes.max);
+    const filtered = txns.filter((txn) => !txn.synced);
+    if (filtered.length === 0) {
+      this.error(`No new ${companyType} transactions found`);
+    }
 
-        const scraper = createScraper({
-            companyId: CompanyTypes.max,
-            startDate: startDate,
-            combineInstallments: true,
-            showBrowser: false,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            verbose: true
+    return filtered;
+  }
+
+  private async syncMax(transactions: DBTransaction[]) {
+    const maxConfig = await this.settings.get(CompanyTypes.max);
+    if (!maxConfig) {
+      this.error(`No ${CompanyTypes.max} config found`);
+    }
+
+    this.log(`Syncing ${transactions.length} transactions`);
+
+    const bar = new progress.SingleBar({}, progress.Presets.shades_classic);
+
+    bar.start(transactions.length, 0);
+
+    for (const txn of transactions) {
+      await this.syncToPocketsmith(maxConfig.accountNumber, {
+        payee: txn.description,
+        amount: txn.chargedAmount,
+        date: this.normalizeDate(new Date(txn.date)).toString(),
+        note: txn.memo,
+        labels: `sync-${format(new Date(), 'ddLLyy')}`,
+        needs_review: true
+      });
+
+      await this.markAsSynced(CompanyTypes.max, txn);
+
+      bar.increment();
+    }
+
+    bar.stop();
+
+    this.log(`[Success] ${CompanyTypes.max} was successfully synced`);
+  }
+
+  private async syncLeumi(transactions: DBTransaction[]) {
+    const leumiConfig = await this.settings.get(CompanyTypes.leumi);
+    if (!leumiConfig) {
+      this.error(`No ${CompanyTypes.leumi} config found`);
+    }
+
+    const maxConfig = await this.settings.get(CompanyTypes.max);
+    if (!maxConfig) {
+      this.error(`No ${CompanyTypes.max} config found`);
+    }
+
+    const loanConfig: number = await this.settings.get(LOAN_KEY);
+    if (!loanConfig) {
+      this.error(`No ${LOAN_KEY} config found`);
+    }
+
+    this.log(`Syncing ${transactions.length} transactions`);
+
+    const bar = new progress.SingleBar({}, progress.Presets.shades_classic);
+
+    bar.start(transactions.length, 0);
+
+    for (const txn of transactions) {
+      let payload: PocketsmithTransaction = {
+        payee: txn.description,
+        amount: txn.chargedAmount,
+        date: this.normalizeDate(new Date(txn.date)).toString(),
+        note: txn.memo,
+        labels: `sync-${format(new Date(), 'ddLLyy')}`,
+        needs_review: true
+      };
+
+      for (const desc of CARD_TRANSACTIONS) {
+        if (!txn.description.includes(desc) || txn.description === `דמי ${desc}`) continue;
+
+        payload.is_transfer = true;
+
+        await this.syncToPocketsmith(maxConfig.accountNumber, {
+          ...payload,
+          amount: txn.chargedAmount * -1
         });
+      }
 
-        CliUx.ux.action.start(`Scraping ${chalk.green(CompanyTypes.max)}`);
+      for (const desc of LOAD_TRANSACTIONS) {
+        if (!txn.description.includes(desc)) continue;
+        payload.is_transfer = true;
 
-        const scrapeResult = await scraper.scrape(
-            maxConfig.credentials as unknown as ScraperCredentials
-        );
-
-        CliUx.ux.action.stop();
-
-        if (!scrapeResult.success) {
-            this.error(`Scraping failed for the following reason: ${JSON.stringify(scrapeResult)}`);
-        }
-
-        if (!scrapeResult.accounts || scrapeResult.accounts.length === 0) {
-            this.error(`no accounts found`);
-        }
-
-        const bar = new progress.SingleBar({}, progress.Presets.shades_classic);
-
-        for (const account of scrapeResult.accounts) {
-            this.log(
-                `Syncing ${account.txns.length} transactions for account number ${account.accountNumber}:`
-            );
-
-            bar.start(account.txns.length, 0);
-
-            for (const txn of account.txns) {
-                if (txn.status === 'completed') {
-                    await this.syncToPocketsmith(maxConfig.accountNumber, {
-                        payee: txn.description,
-                        amount: txn.chargedAmount,
-                        date: this.normalizeDate(new Date(txn.date)).toString(),
-                        note: txn.memo,
-                        labels: `sync-${format(new Date(), 'ddLLyy')}`,
-                        needs_review: true
-                    });
-                }
-                bar.increment();
-            }
-
-            bar.stop();
-        }
-
-        this.log(`${chalk.green('[Success]')} ${CompanyTypes.max} was successfully synced`);
-    }
-
-    private async syncLeumi(startDate: Date) {
-        const leumiConfig = await this.settings.get(CompanyTypes.leumi);
-        const maxConfig = await this.settings.get(CompanyTypes.max);
-        const loanConfig: number = await this.settings.get(LOAN_KEY);
-
-        const scraper = createScraper({
-            companyId: CompanyTypes.leumi,
-            startDate: startDate,
-            combineInstallments: true,
-            showBrowser: false,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            verbose: true
+        await this.syncToPocketsmith(loanConfig, {
+          ...payload,
+          amount: txn.chargedAmount * -1
         });
+      }
 
-        CliUx.ux.action.start(`Scraping ${chalk.green(CompanyTypes.leumi)}`);
+      await this.syncToPocketsmith(leumiConfig.accountNumber, payload);
 
-        const scrapeResult = await scraper.scrape(
-            leumiConfig.credentials as unknown as ScraperCredentials
-        );
+      await this.markAsSynced(CompanyTypes.leumi, txn);
 
-        CliUx.ux.action.stop();
-
-        if (!scrapeResult.success) {
-            this.error(`Scraping failed for the following reason: ${JSON.stringify(scrapeResult)}`);
-        }
-
-        if (!scrapeResult.accounts || scrapeResult.accounts.length === 0) {
-            this.error(`no accounts found`);
-        }
-
-        const bar = new progress.SingleBar({}, progress.Presets.shades_classic);
-
-        for (const account of scrapeResult.accounts) {
-            this.log(
-                `Syncing ${account.txns.length} transactions for account number ${account.accountNumber}:`
-            );
-
-            bar.start(account.txns.length, 0);
-
-            for (const txn of account.txns) {
-                if (txn.status !== 'completed') {
-                    bar.increment();
-                    continue;
-                }
-
-                let payload: PocketsmithTransaction = {
-                    payee: txn.description,
-                    amount: txn.chargedAmount,
-                    date: this.normalizeDate(new Date(txn.date)).toString(),
-                    note: txn.memo,
-                    labels: `sync-${format(new Date(), 'ddLLyy')}`,
-                    needs_review: true
-                };
-
-                for (const desc of CARD_TRANSACTIONS) {
-                    if (!txn.description.includes(desc) || txn.description === `דמי ${desc}`)
-                        continue;
-
-                    payload.is_transfer = true;
-
-                    await this.syncToPocketsmith(maxConfig.accountNumber, {
-                        ...payload,
-                        amount: txn.chargedAmount * -1
-                    });
-                }
-
-                for (const desc of LOAD_TRANSACTIONS) {
-                    if (!txn.description.includes(desc)) continue;
-                    payload.is_transfer = true;
-
-                    await this.syncToPocketsmith(loanConfig, {
-                        ...payload,
-                        amount: txn.chargedAmount * -1
-                    });
-                }
-
-                await this.syncToPocketsmith(leumiConfig.accountNumber, payload);
-
-                bar.increment();
-            }
-
-            bar.stop();
-        }
-
-        this.log(`${chalk.green('[Success]')} ${CompanyTypes.leumi} was successfully synced`);
+      bar.increment();
     }
 
-    private normalizeDate(date: Date): Date {
-        return utcToZonedTime(startOfDay(date), 'Asia/Jerusalem');
+    bar.stop();
+
+    this.log(`[Success] ${CompanyTypes.leumi} was successfully synced`);
+  }
+
+  private async markAsSynced(companyType: CompanyType, txn: DBTransaction) {
+    const id = txn.identifier || `${txn.date}|${txn.chargedAmount}|${txn.description}`;
+    const index = await this.db.getIndex(`${DB}/${companyType}`, id);
+
+    if (index > 0) {
+      await this.db.push(`${DB}/${companyType}[${index}]/synced`, true, true);
     }
+  }
 
-    private async syncToPocketsmith(accountNumber: number, transaction: PocketsmithTransaction) {
-        const psKey = await this.settings.get(PS_KEY);
+  private async syncToPocketsmith(accountNumber: number, transaction: PocketsmithTransaction) {
+    const psKey = await this.settings.get(PS_KEY);
 
-        try {
-            await axios.post(
-                `https://api.pocketsmith.com/v2/transaction_accounts/${accountNumber}/transactions`,
-                transaction,
-                {
-                    headers: {
-                        Accept: 'application/json',
-                        'Content-Type': 'application/json',
-                        'X-Developer-Key': psKey
-                    }
-                }
-            );
-        } catch (error) {
-            if (axios.isAxiosError(error)) {
-                this.error(JSON.stringify(error.response?.data));
-            } else {
-                throw error;
-            }
+    try {
+      await axios.post(
+        `https://api.pocketsmith.com/v2/transaction_accounts/${accountNumber}/transactions`,
+        transaction,
+        {
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Developer-Key': psKey
+          }
         }
+      );
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.error(JSON.stringify(error.response?.data));
+      } else {
+        throw error;
+      }
     }
+  }
 }

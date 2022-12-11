@@ -1,4 +1,3 @@
-import * as chalk from 'chalk';
 import { CliUx } from '@oclif/core';
 import { CompanyTypes } from 'israeli-bank-scrapers';
 
@@ -37,9 +36,7 @@ export class Setup extends Command {
                 this.error(`Unknown service: ${args.service}`);
         }
 
-        this.log(
-            `${chalk.green('[Success]')} Credentials for ${args.service} were successfully saved`
-        );
+        this.log(`[Success] Credentials for ${args.service} were successfully saved`);
     }
 
     async setupPocketsmith(): Promise<string> {
@@ -57,7 +54,7 @@ export class Setup extends Command {
     }
 
     async setupService(): Promise<ServiceConfig> {
-        const accountNumber: number = await CliUx.ux.prompt('Enter pocketsmith account number', {
+        const accountNumber: string = await CliUx.ux.prompt('Enter pocketsmith account number', {
             type: 'mask',
             required: true
         });
@@ -73,7 +70,7 @@ export class Setup extends Command {
         });
 
         return {
-            accountNumber,
+            accountNumber: Number(accountNumber),
             credentials: {
                 username,
                 password
