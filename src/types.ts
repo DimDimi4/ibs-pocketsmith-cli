@@ -6,6 +6,7 @@ export const LOAN_KEY = 'loan';
 export const DB = '/txns';
 
 export type DBTransaction = Transaction & {
+  id: string;
   synced?: boolean;
 };
 
@@ -28,11 +29,12 @@ export interface Configs {
 }
 
 export interface SynArgs {
-  service: CompanyTypes;
+  service: CompanyType;
+  export?: boolean;
 }
 
 export interface ScrapeArgs {
-  service: CompanyTypes;
+  service: CompanyType;
   startDate?: string;
   forceRewrite?: boolean;
 }

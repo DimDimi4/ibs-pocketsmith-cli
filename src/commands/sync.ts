@@ -1,5 +1,9 @@
 import { format } from 'date-fns';
-import { CompanyTypes, createScraper } from 'israeli-bank-scrapers';
+import { Parser } from 'json2csv';
+import { promises as fs } from 'fs';
+import { ensureDirSync } from 'fs-extra';
+
+import { CompanyTypes } from 'israeli-bank-scrapers';
 import * as progress from 'cli-progress';
 import axios from 'axios';
 
@@ -13,9 +17,9 @@ import {
   CompanyType
 } from '../types';
 import Command from '../base';
+import { join } from 'path';
 
 const CARD_TRANSACTIONS = ['כרטיס דביט', 'מקס איט פינ', 'לאומי ויזה'];
-const LOAD_TRANSACTIONS = ['פרעון'];
 
 export default class Sync extends Command {
   static description = 'sync financial data to pocketsmith';
@@ -26,57 +30,79 @@ export default class Sync extends Command {
       description: 'financial service to get data from',
       required: true,
       options: [CompanyTypes.leumi, CompanyTypes.max]
+    },
+    {
+      name: 'export',
+      description: 'export to CSV file',
+      required: false,
+      type: 'boolean'
     }
   ];
+
+  private txns: DBTransaction[] = [];
+  private companyType: CompanyType = CompanyTypes.leumi;
+  private export: boolean = false;
+  private dataToExport: Map<string, PocketsmithTransaction[]> = new Map();
 
   public async run(): Promise<void> {
     try {
       const { args } = this.parse<{}, SynArgs>(Sync);
 
-      switch (args.service) {
+      this.companyType = args.service;
+      this.export = args.export || false;
+
+      await this.fetchTxns();
+
+      switch (this.companyType) {
         case CompanyTypes.leumi:
-          await this.syncLeumi(await this.getTxns(CompanyTypes.leumi));
+          await this.syncLeumi();
+          break;
         case CompanyTypes.max:
-          await this.syncMax(await this.getTxns(CompanyTypes.max));
+          await this.syncMax();
+          break;
         default:
-          this.error(`Unknown service: ${args.service}`);
+          this.error(`Unknown service: ${this.companyType}`);
+      }
+
+      if (this.export) {
+        await this.exportToCsv();
       }
     } catch (error: any) {
       this.error(error);
     }
   }
 
-  private async getTxns(companyType: CompanyType) {
-    const txns = await this.db.getObject<DBTransaction[] | undefined>(`${DB}/${companyType}`);
+  private async fetchTxns() {
+    const txns = await this.getTxns(this.companyType);
     if (!txns || txns.length === 0) {
-      this.error(`No ${companyType} transactions found`);
+      this.error(`No ${this.companyType} transactions found`);
     }
 
     const filtered = txns.filter((txn) => !txn.synced);
     if (filtered.length === 0) {
-      this.error(`No new ${companyType} transactions found`);
+      this.error(`No new ${this.companyType} transactions found`);
     }
 
-    return filtered;
+    this.txns = filtered;
   }
 
-  private async syncMax(transactions: DBTransaction[]) {
+  private async syncMax() {
     const maxConfig = await this.settings.get(CompanyTypes.max);
     if (!maxConfig) {
       this.error(`No ${CompanyTypes.max} config found`);
     }
 
-    this.log(`Syncing ${transactions.length} transactions`);
+    this.log(`Syncing ${this.txns.length} transactions`);
 
     const bar = new progress.SingleBar({}, progress.Presets.shades_classic);
 
-    bar.start(transactions.length, 0);
+    bar.start(this.txns.length, 0);
 
-    for (const txn of transactions) {
-      await this.syncToPocketsmith(maxConfig.accountNumber, {
+    for (const txn of this.txns) {
+      await this.syncToPocketsmith(maxConfig.accountNumber, CompanyTypes.max, {
         payee: txn.description,
         amount: txn.chargedAmount,
-        date: this.normalizeDate(new Date(txn.date)).toString(),
+        date: this.normalizeDate(txn.date),
         note: txn.memo,
         labels: `sync-${format(new Date(), 'ddLLyy')}`,
         needs_review: true
@@ -92,7 +118,7 @@ export default class Sync extends Command {
     this.log(`[Success] ${CompanyTypes.max} was successfully synced`);
   }
 
-  private async syncLeumi(transactions: DBTransaction[]) {
+  private async syncLeumi() {
     const leumiConfig = await this.settings.get(CompanyTypes.leumi);
     if (!leumiConfig) {
       this.error(`No ${CompanyTypes.leumi} config found`);
@@ -103,22 +129,17 @@ export default class Sync extends Command {
       this.error(`No ${CompanyTypes.max} config found`);
     }
 
-    const loanConfig: number = await this.settings.get(LOAN_KEY);
-    if (!loanConfig) {
-      this.error(`No ${LOAN_KEY} config found`);
-    }
-
-    this.log(`Syncing ${transactions.length} transactions`);
+    this.log(`Syncing ${this.txns.length} transactions`);
 
     const bar = new progress.SingleBar({}, progress.Presets.shades_classic);
 
-    bar.start(transactions.length, 0);
+    bar.start(this.txns.length, 0);
 
-    for (const txn of transactions) {
+    for (const txn of this.txns) {
       let payload: PocketsmithTransaction = {
         payee: txn.description,
         amount: txn.chargedAmount,
-        date: this.normalizeDate(new Date(txn.date)).toString(),
+        date: this.normalizeDate(txn.date),
         note: txn.memo,
         labels: `sync-${format(new Date(), 'ddLLyy')}`,
         needs_review: true
@@ -129,23 +150,13 @@ export default class Sync extends Command {
 
         payload.is_transfer = true;
 
-        await this.syncToPocketsmith(maxConfig.accountNumber, {
+        await this.syncToPocketsmith(maxConfig.accountNumber, CompanyTypes.max, {
           ...payload,
           amount: txn.chargedAmount * -1
         });
       }
 
-      for (const desc of LOAD_TRANSACTIONS) {
-        if (!txn.description.includes(desc)) continue;
-        payload.is_transfer = true;
-
-        await this.syncToPocketsmith(loanConfig, {
-          ...payload,
-          amount: txn.chargedAmount * -1
-        });
-      }
-
-      await this.syncToPocketsmith(leumiConfig.accountNumber, payload);
+      await this.syncToPocketsmith(leumiConfig.accountNumber, CompanyTypes.leumi, payload);
 
       await this.markAsSynced(CompanyTypes.leumi, txn);
 
@@ -158,7 +169,11 @@ export default class Sync extends Command {
   }
 
   private async markAsSynced(companyType: CompanyType, txn: DBTransaction) {
-    const id = txn.identifier || `${txn.date}|${txn.chargedAmount}|${txn.description}`;
+    const id = String(
+      txn.identifier
+        ? `${txn.identifier}|${txn.date}`
+        : `${txn.date}|${txn.chargedAmount}|${txn.description}`
+    );
     const index = await this.db.getIndex(`${DB}/${companyType}`, id);
 
     if (index > 0) {
@@ -166,27 +181,47 @@ export default class Sync extends Command {
     }
   }
 
-  private async syncToPocketsmith(accountNumber: number, transaction: PocketsmithTransaction) {
-    const psKey = await this.settings.get(PS_KEY);
-
-    try {
-      await axios.post(
-        `https://api.pocketsmith.com/v2/transaction_accounts/${accountNumber}/transactions`,
-        transaction,
-        {
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-Developer-Key': psKey
-          }
-        }
-      );
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        this.error(JSON.stringify(error.response?.data));
-      } else {
-        throw error;
-      }
+  private async syncToPocketsmith(
+    accountNumber: number,
+    accountType: CompanyType | typeof LOAN_KEY,
+    transaction: PocketsmithTransaction
+  ) {
+    if (this.export) {
+      const key = `${accountType}-${accountNumber}`;
+      const account = this.dataToExport.get(key) || [];
+      account.push(transaction);
+      this.dataToExport.set(key, account);
+      return;
     }
+
+    const psKey = await this.settings.get(PS_KEY);
+    await axios.post(
+      `https://api.pocketsmith.com/v2/transaction_accounts/${accountNumber}/transactions`,
+      transaction,
+      {
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-Developer-Key': psKey
+        }
+      }
+    );
+  }
+
+  private async exportToCsv() {
+    const json2csvParser = new Parser();
+
+    this.dataToExport.forEach(async (transactions, fileName) => {
+      const csv = json2csvParser.parse(transactions);
+
+      const path = join(process.cwd(), 'exports');
+      const file = join(path, `${this.companyType}-${fileName}.csv`);
+
+      ensureDirSync(path);
+
+      await fs.writeFile(file, csv);
+
+      this.log(`[Success] ${path} was successfully exported`);
+    });
   }
 }

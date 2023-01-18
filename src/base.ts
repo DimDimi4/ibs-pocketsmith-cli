@@ -2,10 +2,9 @@ import Conf from 'conf';
 import { IConfig } from '@oclif/config';
 import Command from '@oclif/command';
 import { JsonDB, Config } from 'node-json-db';
-import { utcToZonedTime } from 'date-fns-tz';
-import { startOfDay } from 'date-fns';
+import { add } from 'date-fns';
 
-import { Configs } from './types';
+import { Configs, CompanyType, DBTransaction, DB } from './types';
 import { join } from 'path';
 
 export default abstract class extends Command {
@@ -35,7 +34,16 @@ export default abstract class extends Command {
     return super.finally(err);
   }
 
-  protected normalizeDate(date: Date): Date {
-    return utcToZonedTime(startOfDay(date), 'Asia/Jerusalem');
+  protected normalizeDate(date: string): string {
+    return add(new Date(date), { hours: 12 }).toISOString();
+  }
+
+  protected async getTxns(companyType: CompanyType): Promise<DBTransaction[]> {
+    const exists = await this.db.exists(`${DB}/${companyType}`);
+    if (exists) {
+      return this.db.getObject<DBTransaction[]>(`${DB}/${companyType}`);
+    }
+
+    return [];
   }
 }
